@@ -31,12 +31,12 @@ export function BeadCanvas() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Canvas Controls */}
-      <div className="border-b bg-card px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">Mode:</span>
+      <div className="border-b bg-card px-2 sm:px-4 py-2 sm:py-3 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 w-full sm:w-auto">
+          <div className="flex items-center gap-1 sm:gap-2">
+            <span className="text-xs sm:text-sm font-medium">Mode:</span>
             <Select value={canvasMode} onValueChange={(value: "staff" | "grid") => setCanvasMode(value)}>
-              <SelectTrigger className="w-32">
+              <SelectTrigger className="w-24 sm:w-32 h-8 sm:h-9 text-xs sm:text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -52,8 +52,8 @@ export function BeadCanvas() {
           </div>
 
           {canvasMode === "staff" && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">Lines:</span>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <span className="text-xs sm:text-sm font-medium">Lines:</span>
               <Select
                 key={`staff-lines-${staffLines}`}
                 value={staffLines.toString()}
@@ -63,7 +63,7 @@ export function BeadCanvas() {
                   setStaffLines(newLines)
                 }}
               >
-                <SelectTrigger className="w-20">
+                <SelectTrigger className="w-16 sm:w-20 h-8 sm:h-9 text-xs sm:text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -77,34 +77,35 @@ export function BeadCanvas() {
             </div>
           )}
 
-          <div className="flex items-center gap-2">
-            <Button variant={showGrid ? "default" : "outline"} size="sm" onClick={() => setShowGrid(!showGrid)}>
-              <Grid className="h-4 w-4" />
+          <div className="flex items-center gap-1 sm:gap-2">
+            <Button variant={showGrid ? "default" : "outline"} size="sm" className="h-8 sm:h-9 w-8 sm:w-9 p-0" onClick={() => setShowGrid(!showGrid)}>
+              <Grid className="h-3 w-3 sm:h-4 sm:w-4" />
             </Button>
-            <Button variant={showRuler ? "default" : "outline"} size="sm" onClick={() => setShowRuler(!showRuler)}>
-              <Ruler className="h-4 w-4" />
+            <Button variant={showRuler ? "default" : "outline"} size="sm" className="h-8 sm:h-9 w-8 sm:w-9 p-0" onClick={() => setShowRuler(!showRuler)}>
+              <Ruler className="h-3 w-3 sm:h-4 sm:w-4" />
             </Button>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setZoom(Math.max(50, zoom - 25))} disabled={zoom <= 50}>
-              <ZoomOut className="h-4 w-4" />
+        <div className="flex items-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-1 sm:gap-2">
+            <Button variant="outline" size="sm" className="h-8 sm:h-9 w-8 sm:w-9 p-0" onClick={() => setZoom(Math.max(50, zoom - 25))} disabled={zoom <= 50}>
+              <ZoomOut className="h-3 w-3 sm:h-4 sm:w-4" />
             </Button>
-            <span className="text-sm font-medium w-12 text-center">{zoom}%</span>
+            <span className="text-xs sm:text-sm font-medium w-8 sm:w-12 text-center">{zoom}%</span>
             <Button
               variant="outline"
               size="sm"
+              className="h-8 sm:h-9 w-8 sm:w-9 p-0"
               onClick={() => setZoom(Math.min(200, zoom + 25))}
               disabled={zoom >= 200}
             >
-              <ZoomIn className="h-4 w-4" />
+              <ZoomIn className="h-3 w-3 sm:h-4 sm:w-4" />
             </Button>
           </div>
 
-          <Button variant="outline" size="sm" onClick={() => setZoom(100)}>
-            <RotateCcw className="h-4 w-4" />
+          <Button variant="outline" size="sm" className="h-8 sm:h-9 w-8 sm:w-9 p-0" onClick={() => setZoom(100)}>
+            <RotateCcw className="h-3 w-3 sm:h-4 sm:w-4" />
           </Button>
         </div>
       </div>
@@ -150,28 +151,28 @@ export function BeadCanvas() {
             )
 
             return (
-              <Card key={`${strand.id}-${staffLines}`} className="p-6 relative">
+              <Card key={`${strand.id}-${staffLines}`} className="p-3 sm:p-6 relative">
                 {/* Strand Header */}
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <h3 className="font-semibold text-lg">{strand.name}</h3>
-                    <Badge variant="secondary">{strand.lengthCm}cm</Badge>
-                    <Badge variant="outline">{strand.diameterMm}mm beads</Badge>
-                    {needsResize && <Badge variant="destructive">Needs {calculatedBeadCount} beads</Badge>}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-3">
+                    <h3 className="font-semibold text-base sm:text-lg">{strand.name}</h3>
+                    <Badge variant="secondary" className="text-xs sm:text-sm">{strand.lengthCm}cm</Badge>
+                    <Badge variant="outline" className="text-xs sm:text-sm">{strand.diameterMm}mm beads</Badge>
+                    {needsResize && <Badge variant="destructive" className="text-xs sm:text-sm">Needs {calculatedBeadCount} beads</Badge>}
                     {canvasMode === "staff" && (
-                      <Badge variant="outline">
+                      <Badge variant="outline" className="text-xs sm:text-sm">
                         {staffLines} lines × {beadsPerLine} beads
                       </Badge>
                     )}
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-xs sm:text-sm text-muted-foreground">
                       {strand.cells.filter((cell) => cell.beadId).length} / {strand.cells.length} filled
                     </span>
                     {design.strands.length > 1 && (
-                      <Button variant="outline" size="sm" onClick={() => removeStrand(strand.id)}>
-                        <Minus className="h-4 w-4" />
+                      <Button variant="outline" size="sm" className="h-7 sm:h-9 w-7 sm:w-9 p-0" onClick={() => removeStrand(strand.id)}>
+                        <Minus className="h-3 w-3 sm:h-4 sm:w-4" />
                       </Button>
                     )}
                   </div>
@@ -283,10 +284,10 @@ export function BeadCanvas() {
                 )}
 
                 {/* Strand Controls */}
-                <div className="mt-4 flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm">Length:</span>
+                <div className="mt-3 sm:mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+                    <div className="flex items-center gap-1 sm:gap-2">
+                      <span className="text-xs sm:text-sm">Length:</span>
                       <Slider
                         value={[strand.lengthCm]}
                         onValueChange={([value]) => {
@@ -296,13 +297,13 @@ export function BeadCanvas() {
                         max={50}
                         min={5}
                         step={0.5}
-                        className="w-24"
+                        className="w-20 sm:w-24"
                       />
-                      <span className="text-sm w-12">{strand.lengthCm}cm</span>
+                      <span className="text-xs sm:text-sm w-10 sm:w-12">{strand.lengthCm}cm</span>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm">Bead Size:</span>
+                    <div className="flex items-center gap-1 sm:gap-2">
+                      <span className="text-xs sm:text-sm">Bead Size:</span>
                       <Select
                         value={strand.diameterMm.toString()}
                         onValueChange={(value) => {
@@ -311,7 +312,7 @@ export function BeadCanvas() {
                           updateStrandDiameter?.(strand.id, newDiameter)
                         }}
                       >
-                        <SelectTrigger className="w-20">
+                        <SelectTrigger className="w-16 sm:w-20 h-8 sm:h-9 text-xs sm:text-sm">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -326,10 +327,10 @@ export function BeadCanvas() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" className="h-7 sm:h-9 text-xs sm:text-sm">
                       Clear Strand
                     </Button>
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" className="h-7 sm:h-9 text-xs sm:text-sm">
                       Fill Pattern
                     </Button>
                   </div>
@@ -339,10 +340,10 @@ export function BeadCanvas() {
           })}
 
           {/* Add Strand Button */}
-          <Card className="p-6 border-dashed">
-            <Button variant="outline" className="w-full bg-transparent" onClick={addStrand}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add New Strand
+          <Card className="p-3 sm:p-6 border-dashed">
+            <Button variant="outline" className="w-full bg-transparent h-8 sm:h-10" onClick={addStrand}>
+              <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+              <span className="text-xs sm:text-sm">Add New Strand</span>
             </Button>
           </Card>
         </div>

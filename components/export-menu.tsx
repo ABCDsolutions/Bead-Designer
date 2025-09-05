@@ -10,7 +10,11 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Download, FileText, Share2, FileSpreadsheet } from "lucide-react"
 
-export function ExportMenu() {
+interface ExportMenuProps {
+  isMobile?: boolean;
+}
+
+export function ExportMenu({ isMobile }: ExportMenuProps = { isMobile: false }) {
   const { design, exportSequence, exportBOM, exportDesignData } = useDesignStore()
 
   const exportToPDF = () => {
@@ -77,10 +81,17 @@ export function ExportMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Download className="h-4 w-4 mr-2" />
-          Exportar
-        </Button>
+        {isMobile ? (
+          <Button variant="outline" size="sm" className="flex-col p-2 h-auto">
+            <Download className="h-4 w-4 mb-1" />
+            <span className="text-xs">Exportar</span>
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm">
+            <Download className="h-4 w-4 mr-2" />
+            Exportar
+          </Button>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuItem onClick={exportToPDF}>

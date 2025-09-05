@@ -1,0 +1,74 @@
+/* Estilos responsive globales */
+
+/* Mobile First Approach */
+html {
+  font-size: 14px;
+}
+
+@media (min-width: 640px) {
+  html {
+    font-size: 16px;
+  }
+}
+
+/* Asegurar que todas las imágenes sean responsivas */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Evitar que el contenido se desborde en móviles */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Mejorar la usabilidad táctil en dispositivos móviles */
+button, 
+input[type="button"], 
+input[type="submit"],
+a.button,
+.button,
+[role="button"] {
+  min-height: 44px; /* Tamaño mínimo recomendado para elementos táctiles */
+}
+
+@media (min-width: 640px) {
+  button, 
+  input[type="button"], 
+  input[type="submit"],
+  a.button,
+  .button,
+  [role="button"] {
+    min-height: auto; /* Restaurar altura normal en pantallas más grandes */
+  }
+}
+
+/* Ajustes específicos para componentes */
+.mobile-menu {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 768px) {
+  .mobile-menu {
+    display: none;
+  }
+}
+
+/* Ajuste para scroll horizontal en contenedores de cuentas */
+.bead-container {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 1rem; /* Espacio para la barra de desplazamiento */
+}
+
+/* Optimización para dispositivos táctiles */
+@media (hover: none) {
+  .hover\:scale-105:hover {
+    transform: none !important;
+  }
+  
+  .hover\:bg-opacity-80:hover {
+    --tw-bg-opacity: 1 !important;
+  }
+}

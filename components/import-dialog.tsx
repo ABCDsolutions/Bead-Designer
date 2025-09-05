@@ -13,7 +13,11 @@ import { useDesignStore } from "@/lib/store"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
 
-export function ImportDialog() {
+interface ImportDialogProps {
+  isMobile?: boolean;
+}
+
+export function ImportDialog({ isMobile }: ImportDialogProps = { isMobile: false }) {
   const [isOpen, setIsOpen] = useState(false)
   const [importMethod, setImportMethod] = useState<"file" | "text">("file")
   const [jsonText, setJsonText] = useState("")
@@ -109,10 +113,17 @@ export function ImportDialog() {
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Upload className="h-4 w-4 mr-2" />
-          Importar Diseño
-        </Button>
+        {isMobile ? (
+          <Button variant="outline" size="sm" className="flex-col p-2 h-auto">
+            <Upload className="h-4 w-4 mb-1" />
+            <span className="text-xs">Importar</span>
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm">
+            <Upload className="h-4 w-4 mr-2" />
+            Importar Diseño
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>

@@ -145,8 +145,8 @@ export default function BeadDesigner() {
     }
     setStaffLines([...staffLines, newLine])
     
-    // Sincronizar con el store para persistencia
-    setTimeout(() => syncWithStore(), 0);
+    // Sincronizar con el store para persistencia inmediatamente
+    syncWithStore();
   }
 
   const removeStaffLine = (lineId?: number) => {
@@ -182,8 +182,8 @@ export default function BeadDesigner() {
       }
     }
     
-    // Sincronizar con el store para persistencia
-    setTimeout(() => syncWithStore(), 0);
+    // Sincronizar con el store para persistencia inmediatamente
+    syncWithStore();
   }
 
   // Función para mapear formas personalizadas a las formas soportadas por el store
@@ -215,9 +215,8 @@ export default function BeadDesigner() {
       ),
     )
 
-    // Sincronizar con el store para persistencia
-    // Debounce para reducir actualizaciones frecuentes
-    setTimeout(() => syncWithStore(), 300);
+    // Sincronizar inmediatamente con el store para persistencia
+    syncWithStore();
   }
 
   const removeBead = (lineId: number, position: number) => {
@@ -230,77 +229,56 @@ export default function BeadDesigner() {
       ),
     )
 
-    // Sincronizar con el store para persistencia
-    // Debounce para reducir actualizaciones frecuentes
-    setTimeout(() => syncWithStore(), 300);
+    // Sincronizar inmediatamente con el store para persistencia
+    syncWithStore();
   }
 
   // Función para sincronizar el estado local con el store de Zustand
   const syncWithStore = () => {
     const storeState = useDesignStore.getState();
     const currentDesign = storeState.design;
-    const importDesign = storeState.importDesign;
+    const setCell = storeState.setCell;
     
-    // Crear un conjunto único de cuentas para la paleta
-    const uniqueBeads = new Map();
-    staffLines.forEach(line => {
-      line.beads.forEach(bead => {
+    // En lugar de reconstruir todo el diseño, vamos a actualizar directamente las celdas
+    // Esto preservará el historial y el estado sin sobrescribir todo
+    staffLines.forEach((line, lineIndex) => {
+      // Asegúrate de que la strand existe en el diseño actual
+      if (lineIndex >= currentDesign.strands.length) {
+        return;
+      }
+      
+      const strandId = currentDesign.strands[lineIndex].id;
+      
+      // Actualizar las celdas individuales solo si hay cambios
+      line.beads.forEach((bead, position) => {
+        // Obtener el estado actual de la celda en el store
+        const currentCell = currentDesign.strands[lineIndex].cells[position];
+        if (!currentCell) return; // Protección contra índices fuera de rango
+        
+        // Determinar el nuevo beadId
+        let newBeadId: string | null = null;
         if (bead) {
-          const beadId = `${bead.color}-${bead.shape}`.replace(/#/g, "");
-          uniqueBeads.set(beadId, {
-            id: beadId,
-            name: bead.name,
-            hex: bead.color,
-            mm: 6, // Valor predeterminado
-            shape: mapShapeForExport(bead.shape)
-          });
+          newBeadId = `${bead.color}-${bead.shape}`.replace(/#/g, "");
+          
+          // Asegurarse de que la cuenta existe en la paleta
+          if (!storeState.palette[newBeadId]) {
+            storeState.addBead({
+              id: newBeadId,
+              name: bead.name,
+              hex: bead.color,
+              mm: 6, // Valor predeterminado
+              shape: mapShapeForExport(bead.shape) as "round" | "oval" | "square" | "tube" | "bicone"
+            });
+          }
+        }
+        
+        // Actualizar la celda solo si hay un cambio
+        const currentBeadId = currentCell.beadId;
+        if (newBeadId !== currentBeadId) {
+          setCell(strandId, position, newBeadId);
         }
       });
     });
-
-    // Crear strands (líneas) para el diseño, preservando los IDs y propiedades existentes
-    const strands = staffLines.map((line, idx) => {
-      // Preservar el ID y las propiedades si esta strand ya existe
-      const existingStrand = currentDesign.strands[idx];
-      return {
-        id: existingStrand ? existingStrand.id : `strand-${line.id}-${Date.now()}`,
-        name: existingStrand ? existingStrand.name : `Línea ${line.id}`,
-        lengthCm: existingStrand ? existingStrand.lengthCm : 18,
-        diameterMm: existingStrand ? existingStrand.diameterMm : 6,
-        cells: line.beads.map(bead => {
-          if (bead) {
-            const beadId = `${bead.color}-${bead.shape}`.replace(/#/g, "");
-            return { beadId };
-          }
-          return { beadId: null };
-        })
-      };
-    });
-
-    // Crear el objeto del diseño preservando los datos existentes
-    const exportData = {
-      design: {
-        // Preservar el ID original si existe
-        id: currentDesign.id || `design-${Date.now()}`,
-        name: currentDesign.name || "Diseño de Pentagrama",
-        strands: strands,
-        symmetry: currentDesign.symmetry || "none" as "none" | "mirror-center",
-        updatedAt: Date.now()
-      },
-      // Convertir las cuentas únicas a un array
-      palette: Array.from(uniqueBeads.values()),
-      // Mantener el inventario existente y añadir nuevas cuentas con stock por defecto
-      inventory: Array.from(uniqueBeads.values()).map(bead => {
-        const existingInventory = storeState.inventory[bead.id];
-        return {
-          beadId: bead.id,
-          stock: existingInventory ? existingInventory.stock : 50
-        };
-      })
-    };
-    
-    // Actualizar el store con los datos actuales, pero preservando el historial
-    importDesign(exportData);
   }
 
   const getBeadStyle = (bead: Bead) => {
@@ -424,15 +402,16 @@ export default function BeadDesigner() {
     <div className="min-h-screen bg-background p-4">
       {/* Header */}
       <div className="mb-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
           <div>
-            <h1 className="text-3xl font-bold text-foreground mb-2">Diseñador de Cuentas</h1>
-            <p className="text-muted-foreground">Crea patrones de cuentas usando el sistema de pentagrama</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2">Diseñador de Cuentas</h1>
+            <p className="text-muted-foreground text-sm sm:text-base">Crea patrones de cuentas usando el sistema de pentagrama</p>
           </div>
           <Link href="/assembly">
             <Button variant="outline" className="flex items-center gap-2 bg-transparent">
               <Wrench className="w-4 h-4" />
-              Ver Guía de Armado
+              <span className="hidden sm:inline">Ver Guía de Armado</span>
+              <span className="sm:hidden">Guía</span>
             </Button>
           </Link>
         </div>
@@ -441,10 +420,10 @@ export default function BeadDesigner() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Main Canvas */}
         <div className="lg:col-span-3">
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                <Grid3X3 className="w-5 h-5" />
+          <Card className="p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 mb-4">
+              <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2">
+                <Grid3X3 className="w-4 h-4 sm:w-5 sm:h-5" />
                 Pentagrama de Cuentas
               </h2>
               <div className="flex items-center gap-2">
@@ -459,21 +438,21 @@ export default function BeadDesigner() {
             </div>
 
             {/* Staff Lines */}
-            <div className="space-y-4 bg-muted/30 p-4 pl-10 rounded-lg">
+            <div className="space-y-4 bg-muted/30 p-2 sm:p-4 pl-8 sm:pl-10 rounded-lg overflow-x-auto">
               {staffLines.map((line) => (
-                <div key={line.id} className="relative">
+                <div key={line.id} className="relative min-w-max">
                   {/* Line number and remove button */}
-                  <div className="absolute -left-8 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                    <div className="text-sm font-medium text-muted-foreground">{line.id}</div>
+                  <div className="absolute -left-6 sm:-left-8 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    <div className="text-xs sm:text-sm font-medium text-muted-foreground">{line.id}</div>
                     <button 
-                      className="w-5 h-5 flex items-center justify-center rounded hover:bg-red-100 hover:text-red-500"
+                      className="w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center rounded hover:bg-red-100 hover:text-red-500"
                       onClick={(e) => {
                         e.stopPropagation();
                         removeStaffLine(line.id);
                       }}
                       title="Eliminar esta línea"
                     >
-                      <Minus className="w-3 h-3" />
+                      <Minus className="w-2 h-2 sm:w-3 sm:h-3" />
                     </button>
                   </div>
 
@@ -485,14 +464,16 @@ export default function BeadDesigner() {
                     {line.beads.map((bead, position) => (
                       <div
                         key={position}
-                        className="w-8 h-8 border border-dashed border-muted-foreground/30 rounded-full flex items-center justify-center cursor-pointer hover:border-primary transition-colors relative"
+                        className="w-6 h-6 sm:w-8 sm:h-8 border border-dashed border-muted-foreground/30 rounded-full flex items-center justify-center cursor-pointer hover:border-primary transition-colors relative"
                         onClick={() => (bead ? removeBead(line.id, position) : placeBead(line.id, position))}
                       >
                         {bead && (
-                          <div className="w-6 h-6" style={getBeadStyle(bead)} title={`${bead.name} - ${bead.shape}`} />
+                          <div className="w-4 h-4 sm:w-6 sm:h-6" style={getBeadStyle(bead)} title={`${bead.name} - ${bead.shape}`} />
                         )}
-                        {/* Position indicator */}
-                        <div className="absolute -bottom-6 text-xs text-muted-foreground">{position + 1}</div>
+                        {/* Position indicator - Only show every 5th position on mobile */}
+                        <div className={`absolute -bottom-6 text-xs text-muted-foreground ${position % 5 !== 0 ? "hidden sm:block" : ""}`}>
+                          {position + 1}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -501,11 +482,11 @@ export default function BeadDesigner() {
             </div>
 
             {/* Controls */}
-            <div className="flex items-center justify-between mt-4 pt-4 border-t">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-4 pt-4 border-t gap-4 sm:gap-0">
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Cuentas por línea:</span>
-                  <Button variant="outline" size="sm" onClick={() => {
+                  <span className="text-xs sm:text-sm font-medium">Cuentas por línea:</span>
+                  <Button variant="outline" size="sm" className="h-7 sm:h-8" onClick={() => {
                     const newCount = Math.max(10, beadsPerLine - 5);
                     setBeadsPerLine(newCount);
                     
@@ -521,13 +502,13 @@ export default function BeadDesigner() {
                     }));
                     setStaffLines(newStaffLines);
                     
-                    // Sincronizar con el store
-                    setTimeout(() => syncWithStore(), 0);
+                    // Sincronizar con el store inmediatamente
+                    syncWithStore();
                   }}>
                     <Minus className="w-3 h-3" />
                   </Button>
                   <Badge variant="outline">{beadsPerLine}</Badge>
-                  <Button variant="outline" size="sm" onClick={() => {
+                  <Button variant="outline" size="sm" className="h-7 sm:h-8" onClick={() => {
                     const newCount = Math.min(50, beadsPerLine + 5);
                     setBeadsPerLine(newCount);
                     
@@ -543,18 +524,18 @@ export default function BeadDesigner() {
                     }));
                     setStaffLines(newStaffLines);
                     
-                    // Sincronizar con el store
-                    setTimeout(() => syncWithStore(), 0);
+                    // Sincronizar con el store inmediatamente
+                    syncWithStore();
                   }}>
                     <Plus className="w-3 h-3" />
                   </Button>
                 </div>
               </div>
 
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 sm:flex gap-2">
                 <Button 
                   variant="default"
-                  className="bg-green-600 hover:bg-green-700" 
+                  className="bg-green-600 hover:bg-green-700 h-9 sm:h-10" 
                   onClick={() => {
                     // Llamar a la función createNewDesign del store
                     const createNewDesign = useDesignStore.getState().createNewDesign;
@@ -578,42 +559,42 @@ export default function BeadDesigner() {
                     });
                   }}
                 >
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  NUEVO
+                  <RotateCcw className="w-4 h-4 mr-1 sm:mr-2" />
+                  <span className="text-xs sm:text-sm">NUEVO</span>
                 </Button>
                 <ImportDialog />
-                <Link href="/assembly">
-                  <Button variant="default">
-                    <Wrench className="w-4 h-4 mr-2" />
-                    Armado
+                <Link href="/assembly" className="col-span-2 sm:col-span-1">
+                  <Button variant="default" className="w-full sm:w-auto h-9 sm:h-10">
+                    <Wrench className="w-4 h-4 mr-1 sm:mr-2" />
+                    <span className="text-xs sm:text-sm">Armado</span>
                   </Button>
                 </Link>
-                <Button variant="outline" onClick={exportDesign}>
-                  <Download className="w-4 h-4 mr-2" />
-                  Exportar
+                <Button variant="outline" onClick={exportDesign} className="h-9 sm:h-10">
+                  <Download className="w-4 h-4 mr-1 sm:mr-2" />
+                  <span className="text-xs sm:text-sm">Exportar</span>
                 </Button>
-                <Button variant="outline">
-                  <Share2 className="w-4 h-4 mr-2" />
-                  Compartir
+                <Button variant="outline" className="h-9 sm:h-10">
+                  <Share2 className="w-4 h-4 mr-1 sm:mr-2" />
+                  <span className="text-xs sm:text-sm">Compartir</span>
                 </Button>
               </div>
             </div>
           </Card>
         </div>
 
-        {/* Sidebar */}
+        {/* Sidebar - Becomes horizontal on mobile */}
         <div className="space-y-6">
           {/* Color Palette */}
-          <Card className="p-4">
-            <h3 className="font-semibold mb-3 flex items-center gap-2">
-              <Palette className="w-4 h-4" />
+          <Card className="p-3 sm:p-4">
+            <h3 className="font-semibold mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+              <Palette className="w-3 h-3 sm:w-4 sm:h-4" />
               Paleta de Colores
             </h3>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            <div className="grid grid-cols-5 sm:grid-cols-2 gap-2 mb-2">
               {BEAD_COLORS.map((color) => (
                 <button
                   key={color.color}
-                  className={`w-full h-10 rounded-lg border-2 transition-all ${
+                  className={`w-full h-8 sm:h-10 rounded-lg border-2 transition-all ${
                     selectedColor.color === color.color
                       ? "border-primary ring-2 ring-primary/20"
                       : "border-border hover:border-primary/50"
@@ -630,7 +611,7 @@ export default function BeadDesigner() {
               {customColors.map((color) => (
                 <button
                   key={color}
-                  className={`w-full h-10 rounded-lg border-2 transition-all ${
+                  className={`w-full h-8 sm:h-10 rounded-lg border-2 transition-all ${
                     selectedColor.color === color
                       ? "border-primary ring-2 ring-primary/20"
                       : "border-border hover:border-primary/50"
@@ -644,7 +625,7 @@ export default function BeadDesigner() {
             <div className="flex items-center gap-2 mb-2">
               <input
                 type="color"
-                className="w-10 h-10 p-0 border rounded-lg cursor-pointer"
+                className="w-8 h-8 sm:w-10 sm:h-10 p-0 border rounded-lg cursor-pointer"
                 onChange={e => {
                   const color = e.target.value
                   if (!customColors.includes(color)) {
@@ -658,15 +639,15 @@ export default function BeadDesigner() {
               />
               <span className="text-xs text-muted-foreground">Color personalizado</span>
             </div>
-            <div className="mt-3 text-center">
+            <div className="mt-2 sm:mt-3 text-center">
               <Badge variant="secondary">{selectedColor.name}</Badge>
             </div>
           </Card>
 
           {/* Shape Selector */}
-          <Card className="p-4">
-            <h3 className="font-semibold mb-3">Forma de Cuenta</h3>
-            <div className="space-y-2">
+          <Card className="p-3 sm:p-4">
+            <h3 className="font-semibold mb-2 sm:mb-3 text-sm sm:text-base">Forma de Cuenta</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-1 gap-2">
               {([
                 { value: "round", label: "Redonda" },
                 { value: "oval", label: "Ovalada" },
@@ -679,7 +660,7 @@ export default function BeadDesigner() {
               ] as const).map(({ value, label }) => (
                 <button
                   key={value}
-                  className={`w-full p-2 rounded-lg border text-left transition-colors ${
+                  className={`w-full p-1.5 sm:p-2 rounded-lg border text-left transition-colors ${
                     selectedShape === value ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"
                   }`}
                   onClick={() => {
@@ -688,12 +669,12 @@ export default function BeadDesigner() {
                   // La sincronización ocurrirá cuando se coloque la cuenta
                 }}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3">
                     <div
-                      className="w-6 h-6 border border-muted-foreground/30"
+                      className="w-5 h-5 sm:w-6 sm:h-6 border border-muted-foreground/30"
                       style={getBeadStyle({ id: "preview", color: selectedColor.color, name: selectedColor.name, shape: value })}
                     />
-                    <span className="text-sm">{label}</span>
+                    <span className="text-xs sm:text-sm">{label}</span>
                   </div>
                 </button>
               ))}
@@ -701,9 +682,9 @@ export default function BeadDesigner() {
           </Card>
 
           {/* Instructions */}
-          <Card className="p-4">
-            <h3 className="font-semibold mb-3">Instrucciones</h3>
-            <div className="text-sm text-muted-foreground space-y-2">
+          <Card className="p-3 sm:p-4">
+            <h3 className="font-semibold mb-2 sm:mb-3 text-sm sm:text-base">Instrucciones</h3>
+            <div className="text-xs sm:text-sm text-muted-foreground space-y-1 sm:space-y-2">
               <p>• Selecciona un color y forma</p>
               <p>• Haz clic en las posiciones para colocar cuentas</p>
               <p>• Haz clic en una cuenta para eliminarla</p>
