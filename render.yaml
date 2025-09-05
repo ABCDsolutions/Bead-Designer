@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: bead-designer
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    nodeVersion: 20.10.0
+    autoDeploy: true
