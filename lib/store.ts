@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import type { Design, BeadSpec, InventoryItem, Strand } from "@/types/design"
-import { cloneDeep } from "lodash-es"
+// cloneDeep ya no se utiliza tras optimización de actualizaciones focalizadas
 
 import { generateUUID } from "@/lib/utils"
 
@@ -22,11 +22,14 @@ interface DesignState {
   history: Design[]
   future: Design[]
 
+  // History batching
+  historyBatchActive?: boolean
+  historyBatchTimer?: number | null
+  beginHistoryBatch: () => void
+  endHistoryBatch: () => void
+
   // Design actions
   setCell: (strandId: string, index: number, beadId: string | null) => void
-  
-  // Acción especial para actualizar celdas de la primera línea (solución al problema)
-  setFirstLineCell: (strandId: string, index: number, beadId: string | null) => void
   
   applyPattern: (strandId: string, range: [number, number], pattern: string) => void
   undo: () => void
@@ -524,115 +527,76 @@ export const useDesignStore = create<DesignState>((set, get) => {
     history: [],
     future: [],
     lastUpdate: Date.now(), // Añadimos esta propiedad para forzar actualizaciones de la UI
+    historyBatchActive: false,
+    historyBatchTimer: null,
+
+    beginHistoryBatch: () => {
+      const BATCH_IDLE_MS = 600;
+      const state = get();
+      // Guardar snapshot previo solo al iniciar el batch
+      if (!state.historyBatchActive) {
+        try {
+          state.saveToHistory();
+        } catch (e) {
+          console.error('[HistoryBatch] Error al guardar snapshot inicial:', e);
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        // Reiniciar temporizador de inactividad
+        if (state.historyBatchTimer) {
+          try { window.clearTimeout(state.historyBatchTimer as unknown as number); } catch {}
+        }
+        const id = window.setTimeout(() => {
+          set({ historyBatchActive: false, historyBatchTimer: null });
+        }, BATCH_IDLE_MS) as unknown as number;
+        set({ historyBatchActive: true, historyBatchTimer: id });
+      } else {
+        set({ historyBatchActive: true });
+      }
+    },
+
+    endHistoryBatch: () => {
+      const state = get();
+      if (typeof window !== 'undefined' && state.historyBatchTimer) {
+        try { window.clearTimeout(state.historyBatchTimer as unknown as number); } catch {}
+      }
+      set({ historyBatchActive: false, historyBatchTimer: null });
+    },
 
     setCell: (strandId, index, beadId) => {
+      try { get().beginHistoryBatch(); } catch {}
       set((state) => {
-        console.log(`[Store] setCell INMUTABLE INICIADO - strandId: ${strandId}, index: ${index}, beadId: ${beadId}`);
-
         const strandIndex = state.design.strands.findIndex(s => s.id === strandId);
-
         if (strandIndex === -1) {
           console.error(`[Store] setCell ERROR: No se encontró la hebra con id ${strandId}`);
-          return state; // Devuelve el estado sin cambios
+          return state;
         }
-
         const strand = state.design.strands[strandIndex];
         if (!strand.cells || index < 0 || index >= strand.cells.length) {
           console.error(`[Store] setCell ERROR: Índice ${index} fuera de rango para la hebra ${strandId}`);
-          return state; // Devuelve el estado sin cambios
+          return state;
         }
-
         const currentBeadId = strand.cells[index].beadId;
         if (currentBeadId === beadId) {
-          console.log(`[Store] setCell OMITIDO: El beadId es el mismo.`);
-          return state; // No hay cambios necesarios
-        }
-
-        // **ENFOQUE INMUTABLE CORRECTO**
-        // 1. Crear una copia profunda del diseño para evitar mutaciones accidentales.
-        const newDesign = cloneDeep(state.design);
-        
-        // 2. Actualizar la celda específica en la copia.
-        newDesign.strands[strandIndex].cells[index].beadId = beadId;
-        
-        // 3. Actualizar la marca de tiempo.
-        const newTimestamp = Date.now();
-        newDesign.updatedAt = newTimestamp;
-
-        console.log(`[Store] setCell COMPLETADO. Nuevo timestamp: ${newTimestamp}`);
-
-        // 4. Guardar en el almacenamiento local
-        saveToLocalStorage({
-          design: newDesign,
-          palette: state.palette,
-          inventory: state.inventory,
-        });
-        
-        // 5. Retornar el nuevo estado completo.
-        return {
-          design: newDesign,
-          lastUpdate: newTimestamp,
-        };
-      });
-    },
-    
-    // Función especializada para actualizar la primera línea
-    // Esta es una implementación alternativa específicamente diseñada para
-    // evitar el bug de desaparición en la primera línea
-    setFirstLineCell: (strandId, index, beadId) => {
-      set((state) => {
-        console.log(`[Store] setFirstLineCell ESPECIAL - strandId: ${strandId}, index: ${index}, beadId: ${beadId}`);
-
-        const strandIndex = state.design.strands.findIndex(s => s.id === strandId);
-
-        if (strandIndex === -1) {
-          console.error(`[Store] setFirstLineCell ERROR: No se encontró la hebra con id ${strandId}`);
-          return state; 
-        }
-
-        const strand = state.design.strands[strandIndex];
-        if (!strand.cells || index < 0 || index >= strand.cells.length) {
-          console.error(`[Store] setFirstLineCell ERROR: Índice ${index} fuera de rango para la hebra ${strandId}`);
           return state;
         }
 
-        // Crear una nueva copia profunda para evitar referencia al estado anterior
-        const newStrands = state.design.strands.map((s, i) => {
+        // Actualización inmutable focalizada (sin cloneDeep)
+        const updatedStrands = state.design.strands.map((s, i) => {
           if (i !== strandIndex) return s;
-          
-          // Para la hebra específica, crear una copia nueva
-          const updatedCells = [...s.cells];
-          updatedCells[index] = { beadId };
-          
-          return {
-            ...s,
-            cells: updatedCells
-          };
+          const updatedCells = s.cells.map((c, ci) => (ci === index ? { beadId } : c));
+          return { ...s, cells: updatedCells };
         });
-        
         const newTimestamp = Date.now();
-        const newDesign = {
-          ...state.design,
-          strands: newStrands,
-          updatedAt: newTimestamp
-        };
-        
-        console.log(`[Store] setFirstLineCell COMPLETADO con timestamp ${newTimestamp}`);
-        
-        // Guardar en localStorage
-        saveToLocalStorage({
-          design: newDesign,
-          palette: state.palette,
-          inventory: state.inventory,
-        });
-        
-        // Devolver el nuevo estado
-        return {
-          design: newDesign,
-          lastUpdate: newTimestamp,
-        };
+        const newDesign = { ...state.design, strands: updatedStrands, updatedAt: newTimestamp };
+
+        saveToLocalStorage({ design: newDesign, palette: state.palette, inventory: state.inventory });
+        return { design: newDesign, lastUpdate: newTimestamp };
       });
     },
+    
+    // Eliminado setFirstLineCell: ya no se requiere un camino especial
 
     applyPattern: (strandId, range, pattern) => {
       const { design, palette, saveToHistory } = get()
@@ -820,6 +784,14 @@ export const useDesignStore = create<DesignState>((set, get) => {
     importDesign: (designData) => {
       const { design, palette, inventory } = designData
       
+      // Si es actualización interna al mismo diseño, iniciar batch para agrupar
+      try {
+        const current = get().design;
+        if (current && design && current.id === design.id) {
+          get().beginHistoryBatch();
+        }
+      } catch {}
+
       set((state) => {
         // Detectar si es una actualización o una importación real
         const isInternalUpdate = design.id === state.design.id;
@@ -1029,6 +1001,7 @@ export const useDesignStore = create<DesignState>((set, get) => {
     },
 
     addStrand: () => {
+      try { get().beginHistoryBatch(); } catch {}
       const { design } = get()
       const newStrand: Strand = {
         id: generateUUID(),
@@ -1051,6 +1024,7 @@ export const useDesignStore = create<DesignState>((set, get) => {
     },
 
     removeStrand: (strandId) => {
+      try { get().beginHistoryBatch(); } catch {}
       const { design } = get()
       if (design.strands.length > 1) {
         const updatedDesign = {
@@ -1073,6 +1047,7 @@ export const useDesignStore = create<DesignState>((set, get) => {
     },
 
     updateStrandLength: (strandId, lengthCm) => {
+      try { get().beginHistoryBatch(); } catch {}
       const { design } = get()
       const newDesign = { ...design }
       const strand = newDesign.strands.find((s) => s.id === strandId)
@@ -1086,6 +1061,7 @@ export const useDesignStore = create<DesignState>((set, get) => {
     },
 
     updateStrandDiameter: (strandId, diameterMm) => {
+      try { get().beginHistoryBatch(); } catch {}
       const { design } = get()
       const newDesign = { ...design }
       const strand = newDesign.strands.find((s) => s.id === strandId)

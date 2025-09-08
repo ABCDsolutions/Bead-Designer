@@ -1,14 +1,14 @@
 "use client"
 
 import { useDesignStore } from "@/lib/store"
-import { BeadCell, FirstLineBeadCell } from "./bead-cell"
+import { BeadCell } from "./bead-cell"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Slider } from "@/components/ui/slider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Grid, Ruler, Music } from "lucide-react"
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 
 export function BeadCanvas() {
   const { design, addStrand, removeStrand, updateStrandLength, updateStrandDiameter } = useDesignStore()
@@ -18,6 +18,31 @@ export function BeadCanvas() {
   const [canvasMode, setCanvasMode] = useState<"staff" | "grid">("staff")
   const [staffLines, setStaffLines] = useState(5)
   const canvasRef = useRef<HTMLDivElement>(null)
+
+  // Keyboard shortcuts: G (grid), R (ruler), +/- (zoom), 0 (reset zoom)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = e.key
+      if (key === 'g' || key === 'G') {
+        e.preventDefault()
+        setShowGrid(prev => !prev)
+      } else if (key === 'r' || key === 'R') {
+        e.preventDefault()
+        setShowRuler(prev => !prev)
+      } else if (key === '+' || key === '=') {
+        e.preventDefault()
+        setZoom((z) => Math.min(200, z + 25))
+      } else if (key === '-' || key === '_') {
+        e.preventDefault()
+        setZoom((z) => Math.max(50, z - 25))
+      } else if (key === '0') {
+        e.preventDefault()
+        setZoom(100)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   // Calculate total beads needed based on length and diameter
   const calculateBeadCount = (lengthCm: number, diameterMm: number) => {
@@ -139,16 +164,7 @@ export function BeadCanvas() {
             const needsResize = strand.cells.length !== calculatedBeadCount
             const beadsPerLine = calculateBeadsPerLine(calculatedBeadCount, staffLines)
 
-            console.log(
-              "[v0] Strand",
-              strandIndex,
-              "- Staff lines:",
-              staffLines,
-              "Beads per line:",
-              beadsPerLine,
-              "Total beads:",
-              calculatedBeadCount,
-            )
+            // Debug logs removed for performance
 
             return (
               <Card key={strand.id} className="p-3 sm:p-6 relative">
@@ -219,23 +235,6 @@ export function BeadCanvas() {
                             {/* Beads */}
                             {lineCells.map((cell, cellIndex) => {
                               const globalIndex = startIndex + cellIndex
-                              
-                              // Usamos el componente especial para la primera línea (lineIndex === 0)
-                              // que maneja sus propios datos sin depender de props y resuelve el problema
-                              // de desaparición de cuentas en la primera línea
-                              if (lineIndex === 0) {
-                                console.log(`[Canvas] Renderizando FirstLineBeadCell para strand=${strand.id}, index=${globalIndex}`);
-                                return (
-                                  <FirstLineBeadCell
-                                    key={`special-${strand.id}-${globalIndex}`}
-                                    strandId={strand.id}
-                                    index={globalIndex}
-                                    size={strand.diameterMm}
-                                  />
-                                );
-                              }
-                              
-                              // Para el resto de líneas, usamos el componente normal
                               return (
                                 <BeadCell
                                   key={`${strand.id}-${globalIndex}`}

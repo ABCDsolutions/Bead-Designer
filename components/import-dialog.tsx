@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Upload, FileText, AlertCircle } from "lucide-react"
+import { Download, Upload, FileText, AlertCircle } from "lucide-react"
 import { useDesignStore } from "@/lib/store"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
@@ -115,12 +115,12 @@ export function ImportDialog({ isMobile }: ImportDialogProps = { isMobile: false
       <DialogTrigger asChild>
         {isMobile ? (
           <Button variant="outline" size="sm" className="flex-col p-2 h-auto">
-            <Upload className="h-4 w-4 mb-1" />
+            <Download className="h-4 w-4 mb-1" />
             <span className="text-xs">Importar</span>
           </Button>
         ) : (
           <Button variant="outline" size="sm">
-            <Upload className="h-4 w-4 mr-2" />
+            <Download className="h-4 w-4 mr-2" />
             Importar Diseño
           </Button>
         )}

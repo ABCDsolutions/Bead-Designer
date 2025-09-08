@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Minus, Download, Share2, Palette, Grid3X3, Wrench, Save, RotateCcw } from "lucide-react"
+import { Plus, Minus, Upload, Share2, Palette, Grid3X3, Wrench, Save, RotateCcw, Undo2, Redo2 } from "lucide-react"
 import Link from "next/link"
 import { ImportDialog } from "@/components/import-dialog"
 import { useDesignStore } from "@/lib/store"
@@ -48,13 +48,45 @@ export default function BeadDesigner() {
   const [selectedShape, setSelectedShape] = useState<"round" | "oval" | "square" | "star" | "tube" | "tube-horizontal" | "triangle" | "diamond">("round")
   const [beadsPerLine, setBeadsPerLine] = useState(20)
   const [customColors, setCustomColors] = useState<string[]>([])
+  // Mantiene colores personalizados eliminados para no re-importarlos automáticamente
+  const [deletedCustomColors, setDeletedCustomColors] = useState<string[]>([])
   const [hasRestoredDesign, setHasRestoredDesign] = useState(false)
+  const [showPositions, setShowPositions] = useState(true)
   
   const { toast } = useToast()
   
   // Obtener el diseño actual y la paleta del store
   const design = useDesignStore(state => state.design)
   const palette = useDesignStore(state => state.palette)
+  const undo = useDesignStore(state => state.undo)
+  const redo = useDesignStore(state => state.redo)
+  const canUndo = useDesignStore(state => state.history.length > 0)
+  const canRedo = useDesignStore(state => state.future.length > 0)
+
+  // Atajos de teclado: Undo/Redo (Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z o Ctrl/Cmd+Y) y toggle posiciones (R)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+      if (mod && key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+        return
+      }
+      if ((mod && e.shiftKey && key === 'z') || (mod && key === 'y')) {
+        e.preventDefault()
+        redo()
+        return
+      }
+      if (key === 'r') {
+        e.preventDefault()
+        setShowPositions(prev => !prev)
+        return
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [undo, redo])
   
   // Crear la ref para controlar si este es el montaje inicial
   const isInitialMount = useRef(true);
@@ -108,13 +140,23 @@ export default function BeadDesigner() {
         setBeadsPerLine(newStaffLines[0].beads.length);
       }
       
-      // Añadir colores personalizados de la paleta importada
+      // Añadir colores personalizados de la paleta importada (de-duplicado y case-insensitive)
+      const defaultColorSet = new Set(BEAD_COLORS.map(c => c.color.toLowerCase()))
       const importedColors = Object.values(palette)
-        .filter(bead => !BEAD_COLORS.some(c => c.color === bead.hex))
-        .map(bead => bead.hex);
-      
+        .map(bead => bead.hex?.toLowerCase?.() || bead.hex)
+        .filter(Boolean) as string[]
+
       if (importedColors.length > 0) {
-        setCustomColors(prev => [...prev, ...importedColors.filter(c => !prev.includes(c))]);
+        setCustomColors(prev => {
+          const prevSet = new Set(prev.map(c => c.toLowerCase()))
+          const uniqueImported = Array.from(new Set(importedColors))
+          const deletedSet = new Set(deletedCustomColors.map(c => c.toLowerCase()))
+          const merged = [
+            ...prev.map(c => c.toLowerCase()),
+            ...uniqueImported.filter(c => !prevSet.has(c) && !defaultColorSet.has(c) && !deletedSet.has(c))
+          ]
+          return Array.from(new Set(merged))
+        })
       }
       
       // Mostrar notificación de restauración solo en la carga inicial y si hay contenido real
@@ -136,7 +178,7 @@ export default function BeadDesigner() {
         setHasRestoredDesign(true);
       }
     }
-  }, [design, palette, toast]);
+  }, [design, palette, toast, deletedCustomColors]);
 
   const addStaffLine = () => {
     const newLine: StaffLine = {
@@ -273,12 +315,18 @@ export default function BeadDesigner() {
       })
     };
 
-    // Importar como actualización interna (mismo id)
-    importDesign({
+    // Importar como actualización interna (mismo id) fuera del ciclo de render
+    const payload = {
       design: newDesign as any,
       palette: Array.from(uniqueBeads.values()) as any,
       inventory: Array.from(uniqueBeads.values()).map(b => ({ beadId: b.id, stock: 50 })) as any,
-    });
+    };
+    if (typeof window !== 'undefined') {
+      // Deferir para evitar: "Cannot update a component while rendering..."
+      setTimeout(() => importDesign(payload), 0);
+    } else {
+      importDesign(payload);
+    }
   }
 
   const getBeadStyle = (bead: Bead) => {
@@ -434,6 +482,13 @@ export default function BeadDesigner() {
                 <Button variant="outline" size="sm" onClick={addStaffLine}>
                   <Plus className="w-4 h-4" />
                 </Button>
+                <div className="w-px h-6 bg-border mx-1" />
+                <Button variant="outline" size="sm" onClick={() => undo()} disabled={!canUndo} title="Deshacer (Ctrl+Z)">
+                  <Undo2 className="w-4 h-4" />
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => redo()} disabled={!canRedo} title="Rehacer (Ctrl+Shift+Z)">
+                  <Redo2 className="w-4 h-4" />
+                </Button>
               </div>
             </div>
 
@@ -470,10 +525,12 @@ export default function BeadDesigner() {
                         {bead && (
                           <div className="w-4 h-4 sm:w-6 sm:h-6" style={getBeadStyle(bead)} title={`${bead.name} - ${bead.shape}`} />
                         )}
-                        {/* Position indicator - Only show every 5th position on mobile */}
-                        <div className={`absolute -bottom-6 text-xs text-muted-foreground ${position % 5 !== 0 ? "hidden sm:block" : ""}`}>
-                          {position + 1}
-                        </div>
+                        {/* Position indicator - toggleable with 'R' */}
+                        {showPositions && (
+                          <div className={`absolute -bottom-6 text-xs text-muted-foreground ${position % 5 !== 0 ? "hidden sm:block" : ""}`}>
+                            {position + 1}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -570,7 +627,7 @@ export default function BeadDesigner() {
                   </Button>
                 </Link>
                 <Button variant="outline" onClick={exportDesign} className="h-9 sm:h-10">
-                  <Download className="w-4 h-4 mr-1 sm:mr-2" />
+                  <Upload className="w-4 h-4 mr-1 sm:mr-2" />
                   <span className="text-xs sm:text-sm">Exportar</span>
                 </Button>
                 <Button variant="outline" className="h-9 sm:h-10">
@@ -609,17 +666,34 @@ export default function BeadDesigner() {
                 />
               ))}
               {customColors.map((color) => (
-                <button
-                  key={color}
-                  className={`w-full h-8 sm:h-10 rounded-lg border-2 transition-all ${
-                    selectedColor.color === color
-                      ? "border-primary ring-2 ring-primary/20"
-                      : "border-border hover:border-primary/50"
-                  }`}
-                  style={{ backgroundColor: color }}
-                  onClick={() => setSelectedColor({ color, name: "Personalizado" })}
-                  title={"Personalizado"}
-                />
+                <div key={`custom-${color.toLowerCase()}`} className="relative group">
+                  <button
+                    className={`w-full h-8 sm:h-10 rounded-lg border-2 transition-all ${
+                      selectedColor.color.toLowerCase?.() === color.toLowerCase()
+                        ? "border-primary ring-2 ring-primary/20"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => setSelectedColor({ color, name: "Personalizado" })}
+                    title={"Personalizado"}
+                  />
+                  <button
+                    aria-label="Eliminar color personalizado"
+                    title="Eliminar color de la paleta"
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-background/90 border border-border text-xs leading-4 hidden group-hover:block"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const lc = color.toLowerCase();
+                      setCustomColors(prev => prev.filter(c => c.toLowerCase() !== lc));
+                      setDeletedCustomColors(prev => Array.from(new Set([...prev.map(c => c.toLowerCase()), lc])));
+                      if (selectedColor.color.toLowerCase?.() === lc) {
+                        setSelectedColor(BEAD_COLORS[0]);
+                      }
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               ))}
             </div>
             <div className="flex items-center gap-2 mb-2">
@@ -627,10 +701,15 @@ export default function BeadDesigner() {
                 type="color"
                 className="w-8 h-8 sm:w-10 sm:h-10 p-0 border rounded-lg cursor-pointer"
                 onChange={e => {
-                  const color = e.target.value
-                  if (!customColors.includes(color)) {
-                    setCustomColors([...customColors, color])
+                  const raw = e.target.value
+                  const color = raw.toLowerCase()
+                  const defaultColorSet = new Set(BEAD_COLORS.map(c => c.color.toLowerCase()))
+                  const existsInCustom = customColors.some(c => c.toLowerCase() === color)
+                  if (!existsInCustom && !defaultColorSet.has(color)) {
+                    setCustomColors(prev => Array.from(new Set([...prev.map(c => c.toLowerCase()), color])))
                   }
+                  // En caso de reintroducir un color previamente eliminado, quitarlo de la lista de eliminados
+                  setDeletedCustomColors(prev => prev.filter(c => c.toLowerCase() !== color))
                   setSelectedColor({ color, name: "Personalizado" })
                   // No necesitamos sincronizar aquí, ya que solo estamos cambiando el color seleccionado
                   // La sincronización ocurrirá cuando se coloque la cuenta
@@ -689,6 +768,13 @@ export default function BeadDesigner() {
               <p>• Haz clic en las posiciones para colocar cuentas</p>
               <p>• Haz clic en una cuenta para eliminarla</p>
               <p>• Usa los botones + y - para agregar/quitar líneas</p>
+              <div className="pt-2">
+                <p className="font-medium text-foreground">Atajos de teclado</p>
+                <p>• Ctrl/Cmd + Z: Deshacer</p>
+                <p>• Ctrl/Cmd + Shift + Z o Ctrl/Cmd + Y: Rehacer</p>
+                <p>• R: Mostrar/Ocultar posiciones (Pentagrama)</p>
+                <p>• G, R, +, -, 0: Grid, Regla y Zoom (Canvas avanzado)</p>
+              </div>
             </div>
           </Card>
         </div>
