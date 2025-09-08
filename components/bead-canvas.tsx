@@ -1,7 +1,7 @@
 "use client"
 
 import { useDesignStore } from "@/lib/store"
-import { BeadCell } from "./bead-cell"
+import { BeadCell, FirstLineBeadCell } from "./bead-cell"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -151,7 +151,7 @@ export function BeadCanvas() {
             )
 
             return (
-              <Card key={`${strand.id}-${staffLines}`} className="p-3 sm:p-6 relative">
+              <Card key={strand.id} className="p-3 sm:p-6 relative">
                 {/* Strand Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
                   <div className="flex flex-wrap items-center gap-1.5 sm:gap-3">
@@ -187,7 +187,7 @@ export function BeadCanvas() {
                       const lineCells = strand.cells.slice(startIndex, endIndex)
 
                       return (
-                        <div key={`line-${lineIndex}-${staffLines}-${beadsPerLine}`} className="relative">
+                        <div key={`${strand.id}-line-${lineIndex}`} className="relative">
                           {/* Staff Line */}
                           <div className="absolute top-1/2 left-0 right-0 h-px bg-border transform -translate-y-1/2 z-0" />
 
@@ -217,29 +217,52 @@ export function BeadCanvas() {
                             </div>
 
                             {/* Beads */}
-                            {lineCells.map((cell, cellIndex) => (
-                              <BeadCell
-                                key={`${startIndex + cellIndex}-${staffLines}`}
-                                strandId={strand.id}
-                                index={startIndex + cellIndex}
-                                cell={cell}
-                                size={strand.diameterMm}
-                                showPosition={false}
-                              />
-                            ))}
+                            {lineCells.map((cell, cellIndex) => {
+                              const globalIndex = startIndex + cellIndex
+                              
+                              // Usamos el componente especial para la primera línea (lineIndex === 0)
+                              // que maneja sus propios datos sin depender de props y resuelve el problema
+                              // de desaparición de cuentas en la primera línea
+                              if (lineIndex === 0) {
+                                console.log(`[Canvas] Renderizando FirstLineBeadCell para strand=${strand.id}, index=${globalIndex}`);
+                                return (
+                                  <FirstLineBeadCell
+                                    key={`special-${strand.id}-${globalIndex}`}
+                                    strandId={strand.id}
+                                    index={globalIndex}
+                                    size={strand.diameterMm}
+                                  />
+                                );
+                              }
+                              
+                              // Para el resto de líneas, usamos el componente normal
+                              return (
+                                <BeadCell
+                                  key={`${strand.id}-${globalIndex}`}
+                                  strandId={strand.id}
+                                  index={globalIndex}
+                                  cell={cell}
+                                  size={strand.diameterMm}
+                                  showPosition={false}
+                                />
+                              )
+                            })}
 
                             {/* Fill remaining positions if needed */}
                             {lineCells.length < beadsPerLine &&
-                              Array.from({ length: beadsPerLine - lineCells.length }, (_, emptyIndex) => (
-                                <div
-                                  key={`empty-${emptyIndex}-${staffLines}`}
-                                  className="border-2 border-dashed border-muted-foreground/30 rounded-full bg-muted/20"
-                                  style={{
-                                    width: Math.max(strand.diameterMm * 4, 32),
-                                    height: Math.max(strand.diameterMm * 4, 32),
-                                  }}
-                                />
-                              ))}
+                              Array.from({ length: beadsPerLine - lineCells.length }, (_, emptyIndex) => {
+                                const emptyGlobalIndex = startIndex + lineCells.length + emptyIndex
+                                return (
+                                  <div
+                                    key={`${strand.id}-empty-${emptyGlobalIndex}`}
+                                    className="border-2 border-dashed border-muted-foreground/30 rounded-full bg-muted/20"
+                                    style={{
+                                      width: Math.max(strand.diameterMm * 4, 32),
+                                      height: Math.max(strand.diameterMm * 4, 32),
+                                    }}
+                                  />
+                                )
+                              })}
                           </div>
                         </div>
                       )
@@ -270,7 +293,7 @@ export function BeadCanvas() {
                       <div className={`flex flex-wrap gap-1 justify-center ${showGrid ? "grid-overlay" : ""}`}>
                         {strand.cells.map((cell, index) => (
                           <BeadCell
-                            key={index}
+                            key={`${strand.id}-${index}`}
                             strandId={strand.id}
                             index={index}
                             cell={cell}

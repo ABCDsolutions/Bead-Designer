@@ -1,9 +1,12 @@
+export type BeadShape = "round" | "cylinder" | "cube" | "spacer" | "charm" | "oval" | "square" | "tube" | "bicone"
+
 export interface BeadSpec {
   id: string
   name: string
   hex: string
   mm: number
-  shape: "round" | "oval" | "square" | "tube" | "bicone"
+  shape: BeadShape
+  note?: string
 }
 
 export interface InventoryItem {

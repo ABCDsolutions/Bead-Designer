@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import type { Design, BeadSpec, InventoryItem, Strand } from "@/types/design"
+import { cloneDeep } from "lodash-es"
 
 import { generateUUID } from "@/lib/utils"
 
@@ -13,6 +14,9 @@ interface DesignState {
 
   // UI state
   selectedBeadId: string | null
+  
+  // Control de actualizaciones de UI
+  lastUpdate: number
 
   // History for undo/redo
   history: Design[]
@@ -20,6 +24,10 @@ interface DesignState {
 
   // Design actions
   setCell: (strandId: string, index: number, beadId: string | null) => void
+  
+  // Acción especial para actualizar celdas de la primera línea (solución al problema)
+  setFirstLineCell: (strandId: string, index: number, beadId: string | null) => void
+  
   applyPattern: (strandId: string, range: [number, number], pattern: string) => void
   undo: () => void
   redo: () => void
@@ -101,15 +109,111 @@ const saveToLocalStorage = (state: Partial<DesignState>) => {
   }
 
   try {
+    // Validar que tengamos datos válidos antes de guardar
+    if (!state || !state.design || !Array.isArray(state.design.strands)) {
+      console.error("Error: Intentando guardar datos inválidos:", state);
+      return;
+    }
+    
+    // Verificación adicional: asegurarse de que todas las hebras tengan celdas
+    const allStrandsValid = state.design.strands.every(strand => 
+      strand && strand.id && Array.isArray(strand.cells)
+    );
+    
+    if (!allStrandsValid) {
+      console.error("Error: Algunas hebras tienen estructura inválida", state.design.strands);
+      return; // No guardar datos corruptos
+    }
+    
+    // Crear una copia limpia de los datos para guardar
+    // Esto evita problemas con referencias circulares o datos corruptos
+    const cleanDesign = {
+      id: state.design.id,
+      name: state.design.name,
+      symmetry: state.design.symmetry,
+      updatedAt: state.design.updatedAt,
+      strands: state.design.strands.map(strand => ({
+        id: strand.id,
+        name: strand.name,
+        lengthCm: strand.lengthCm,
+        diameterMm: strand.diameterMm,
+        cells: strand.cells.map(cell => ({
+          beadId: cell.beadId
+        }))
+      }))
+    };
+    
     const dataToSave = {
-      design: state.design,
+      design: cleanDesign,
       palette: state.palette,
       inventory: state.inventory,
       timestamp: Date.now(),
+      version: "1.1.0", // Actualizado a versión 1.1.0 con formato mejorado
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave))
+    
+    // Crear un backup rotativo (mantener múltiples backups)
+    // Esto permitirá recuperarse si el último guardado fue corrupto
+    try {
+      // Mover el backup actual al backup histórico
+      const existingData = localStorage.getItem(STORAGE_KEY);
+      if (existingData) {
+        // Intentar verificar si el backup es válido antes de guardarlo
+        const parsed = JSON.parse(existingData);
+        if (parsed && parsed.design && Array.isArray(parsed.design.strands)) {
+          // Guardar en un backup con timestamp
+          const timestamp = new Date().toISOString().replace(/[:\.]/g, '-');
+          localStorage.setItem(`${STORAGE_KEY}_backup_${timestamp}`, existingData);
+          
+          // Mantener un backup simple también
+          localStorage.setItem(STORAGE_KEY + "_backup", existingData);
+          
+          // Limitar a 5 backups históricos para no sobrecargar el localStorage
+          const allKeys = Object.keys(localStorage);
+          const backupKeys = allKeys.filter(key => 
+            key.startsWith(`${STORAGE_KEY}_backup_`)
+          ).sort();
+          
+          if (backupKeys.length > 5) {
+            // Eliminar los backups más antiguos
+            backupKeys.slice(0, backupKeys.length - 5).forEach(key => {
+              localStorage.removeItem(key);
+            });
+          }
+        }
+      }
+    } catch (backupError) {
+      console.error("Error al crear backup:", backupError);
+      // Continuar con el guardado principal aunque el backup falle
+    }
+    
+    // Guardar los nuevos datos
+    try {
+      const serializedData = JSON.stringify(dataToSave);
+      localStorage.setItem(STORAGE_KEY, serializedData);
+      console.log(`[Storage] Datos guardados correctamente (${serializedData.length} bytes)`);
+    } catch (saveError) {
+      console.error("Error al serializar o guardar datos:", saveError);
+      // Intentar guardar una versión más básica si falló la completa
+      try {
+        // Versión minimalista para evitar pérdida total
+        const minimalData = {
+          design: {
+            id: state.design.id,
+            name: state.design.name,
+            strands: state.design.strands.map(s => ({
+              id: s.id,
+              cells: s.cells.map(c => ({ beadId: c.beadId }))
+            }))
+          }
+        };
+        localStorage.setItem(STORAGE_KEY + "_minimal", JSON.stringify(minimalData));
+        console.log("[Storage] Guardado datos en formato minimalista como respaldo");
+      } catch (e) {
+        console.error("Error crítico: No se pudo guardar ni siquiera datos minimales", e);
+      }
+    }
   } catch (error) {
-    console.error("Failed to save to localStorage:", error)
+    console.error("Error general al guardar en localStorage:", error);
   }
 }
 
@@ -118,63 +222,416 @@ const loadFromLocalStorage = (): Partial<DesignState> | null => {
     return null; // Return null on server-side rendering
   }
 
+  let designData: any = null;
+  let isRestoredFromBackup = false;
+  let backupSource = "";
+  
   try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      const data = JSON.parse(saved)
-      return {
-        design: data.design || createDefaultDesign(),
-        palette: data.palette || defaultPalette,
-        inventory: data.inventory || defaultInventory,
+    // Función de validación de datos
+    const isValidDesignData = (data: any): boolean => {
+      // Verificar estructura básica
+      if (!data || !data.design || !Array.isArray(data.design.strands)) {
+        return false;
       }
-    }
-  } catch (error) {
-    console.error("Failed to load from localStorage:", error)
-  }
-  return null
-}
-
-export const useDesignStore = create<DesignState>((set, get) => {
-  const savedState = loadFromLocalStorage()
-
-  return {
-    design: savedState?.design || createDefaultDesign(),
-    palette: savedState?.palette || defaultPalette,
-    inventory: savedState?.inventory || defaultInventory,
-    selectedBeadId: null,
-    history: [],
-    future: [],
-
-    setCell: (strandId, index, beadId) => {
-      const { design, saveToHistory, decrementStock } = get()
-      saveToHistory()
-
-      const newDesign = { ...design }
-      const strand = newDesign.strands.find((s) => s.id === strandId)
-      if (strand && strand.cells[index]) {
-        const oldBeadId = strand.cells[index].beadId
-
-        strand.cells[index] = { beadId }
-
-        if (oldBeadId && oldBeadId !== beadId) {
-          const { incrementStock } = get()
-          incrementStock(oldBeadId, 1)
+      
+      // Verificar que cada hebra tenga una estructura correcta
+      for (const strand of data.design.strands) {
+        if (!strand || !strand.id || !Array.isArray(strand.cells)) {
+          return false;
         }
-        if (beadId && beadId !== oldBeadId) {
-          decrementStock(beadId, 1)
-        }
-
-        if (design.symmetry === "mirror-center") {
-          const mirrorIndex = strand.cells.length - 1 - index
-          if (mirrorIndex !== index && strand.cells[mirrorIndex]) {
-            strand.cells[mirrorIndex] = { beadId }
+        // Verificar que cada celda tiene la estructura correcta
+        for (const cell of strand.cells) {
+          if (cell === null || typeof cell !== 'object') {
+            return false;
+          }
+          // beadId puede ser null pero la celda debe ser un objeto
+          if (!('beadId' in cell)) {
+            return false;
           }
         }
       }
+      
+      return true;
+    };
+    
+    const tryLoadData = (storageKey: string, description: string): any | null => {
+      try {
+        const saved = localStorage.getItem(storageKey);
+        if (!saved) return null;
+        
+        const data = JSON.parse(saved);
+        if (isValidDesignData(data)) {
+          console.log(`[Storage] Datos cargados desde ${description}: ${data.design.strands.length} hebras`);
+          return data;
+        } else {
+          console.warn(`[Storage] Datos en ${description} tienen estructura inválida:`, data);
+          return null;
+        }
+      } catch (e) {
+        console.error(`[Storage] Error al cargar desde ${description}:`, e);
+        return null;
+      }
+    };
+    
+    // Intentar cargar desde almacenamiento principal
+    designData = tryLoadData(STORAGE_KEY, "almacenamiento principal");
+    
+    // Si no encontramos datos válidos, intentar con los backups en orden de prioridad
+    if (!designData) {
+      console.log("[Storage] Intentando cargar desde backups...");
+      
+      // 1. Primero intentar con el backup más reciente
+      designData = tryLoadData(STORAGE_KEY + "_backup", "backup principal");
+      if (designData) {
+        isRestoredFromBackup = true;
+        backupSource = "backup principal";
+      }
+      
+      // 2. Si no funciona, intentar con los backups históricos (del más reciente al más antiguo)
+      if (!designData) {
+        const allKeys = Object.keys(localStorage);
+        const backupKeys = allKeys
+          .filter(key => key.startsWith(`${STORAGE_KEY}_backup_`))
+          .sort((a, b) => b.localeCompare(a)); // Ordenar de más reciente a más antiguo
+          
+        for (const key of backupKeys) {
+          designData = tryLoadData(key, `backup histórico (${key})`);
+          if (designData) {
+            isRestoredFromBackup = true;
+            backupSource = key;
+            break;
+          }
+        }
+      }
+      
+      // 3. Como último recurso, intentar con el backup minimalista
+      if (!designData) {
+        designData = tryLoadData(STORAGE_KEY + "_minimal", "backup minimalista");
+        if (designData) {
+          isRestoredFromBackup = true;
+          backupSource = "backup minimalista";
+          
+          // Completar datos faltantes en caso de backup minimalista
+          if (designData.design) {
+            designData.design.updatedAt = Date.now();
+            designData.design.symmetry = designData.design.symmetry || "none";
+            
+            // Asegurar que cada hebra tiene todos sus datos
+            if (Array.isArray(designData.design.strands)) {
+              designData.design.strands = designData.design.strands.map((s: any) => ({
+                id: s.id,
+                name: s.name || `Hebra ${Math.floor(Math.random() * 1000)}`,
+                lengthCm: s.lengthCm || 18,
+                diameterMm: s.diameterMm || 6,
+                cells: Array.isArray(s.cells) ? s.cells : Array(30).fill({ beadId: null })
+              }));
+            }
+          }
+        }
+      }
+    }
+    
+    // Si no encontramos ningún dato válido, usar valores por defecto
+    if (!designData) {
+      console.log("[Storage] No se encontraron datos válidos, usando valores por defecto");
+      return null;
+    }
+    
+    // Si estamos restaurando desde un backup, notificar
+    if (isRestoredFromBackup) {
+      console.warn(`[Storage] ⚠️ DISEÑO RESTAURADO desde ${backupSource}`);
+      // Mostrar alerta visual al usuario usando setTimeout para asegurar que la UI esté lista
+      setTimeout(() => {
+        try {
+          alert(`⚠️ Diseño restaurado desde copia de seguridad (${backupSource}).
+          
+Es posible que algunos cambios recientes no se hayan guardado correctamente.
 
-      const updatedDesign = { ...newDesign, updatedAt: Date.now() }
-      set({ design: updatedDesign })
-      saveToLocalStorage({ design: updatedDesign, palette: get().palette, inventory: get().inventory })
+Si experimentas problemas persistentes, considera exportar tu diseño como respaldo adicional.`);
+        } catch (e) {
+          console.error("[Storage] Error al mostrar alerta:", e);
+        }
+      }, 1500);
+    }
+    
+    // Devolver los datos cargados
+    return {
+      design: designData.design,
+      palette: designData.palette || defaultPalette,
+      inventory: designData.inventory || defaultInventory
+    };
+    
+  } catch (error) {
+    console.error("[Storage] Error crítico al cargar desde localStorage:", error);
+    
+    // En caso de error crítico, intentar mostrar una notificación al usuario
+    setTimeout(() => {
+      try {
+        alert(`⚠️ Se produjo un error al cargar tu diseño.
+
+Recomendamos:
+1. Revisar si hay errores en la consola
+2. Exportar tu diseño después de cada sesión importante
+3. Si el problema persiste, contactar al soporte técnico`);
+      } catch (e) {
+        // Ignorar error al mostrar alerta
+      }
+    }, 1500);
+    
+    return null;
+  }
+}
+
+// Interfaz para los backups de emergencia
+interface EmergencyBackup {
+  design: Design;
+  palette?: Record<string, BeadSpec>;
+  inventory?: Record<string, InventoryItem>;
+}
+
+// Función para crear un backup de emergencia en sessionStorage
+// Este backup se usa solo si hay un error crítico y se pierde localStorage
+const createEmergencyBackup = (state: Partial<DesignState>) => {
+  try {
+    if (typeof window === 'undefined' || !state || !state.design) return;
+    
+    // Guardar solo lo esencial para minimizar tamaño
+    const minimalState: EmergencyBackup = {
+      design: {
+        id: state.design.id,
+        name: state.design.name,
+        symmetry: state.design.symmetry,
+        updatedAt: state.design.updatedAt,
+        strands: state.design.strands.map(s => ({
+          id: s.id,
+          name: s.name,
+          lengthCm: s.lengthCm || 18,
+          diameterMm: s.diameterMm || 6,
+          cells: s.cells.map(c => ({ beadId: c.beadId }))
+        }))
+      }
+    };
+    
+    // Opcionalmente incluir paleta e inventario si están disponibles
+    if (state.palette) minimalState.palette = state.palette;
+    if (state.inventory) minimalState.inventory = state.inventory;
+    
+    sessionStorage.setItem('bead-design-emergency-backup', JSON.stringify(minimalState));
+  } catch (e) {
+    console.error('[Emergency Backup] Error al crear backup de emergencia:', e);
+  }
+};
+
+// Verificar si hay un backup de emergencia al iniciar
+const checkEmergencyBackup = (): EmergencyBackup | null => {
+  try {
+    if (typeof window === 'undefined') return null;
+    
+    const backup = sessionStorage.getItem('bead-design-emergency-backup');
+    if (!backup) return null;
+    
+    const data = JSON.parse(backup);
+    if (!data || !data.design || !Array.isArray(data.design.strands)) {
+      return null;
+    }
+    
+    // Completar datos faltantes
+    data.design.updatedAt = Date.now();
+    data.design.symmetry = data.design.symmetry || "none";
+    data.design.strands = data.design.strands.map((s: any) => ({
+      id: s.id,
+      name: s.name || 'Hebra recuperada',
+      lengthCm: s.lengthCm || 18,
+      diameterMm: s.diameterMm || 6,
+      cells: Array.isArray(s.cells) ? s.cells : Array(30).fill({ beadId: null })
+    }));
+    
+    console.warn('[Emergency Recovery] Diseño recuperado de backup de emergencia');
+    alert('Se ha recuperado un diseño desde un backup de emergencia. Es posible que algunos cambios recientes no se hayan guardado.');
+    
+    // Limpiar el backup de emergencia para no usarlo nuevamente
+    sessionStorage.removeItem('bead-design-emergency-backup');
+    
+    return {
+      design: data.design,
+      palette: data.palette,
+      inventory: data.inventory
+    };
+  } catch (e) {
+    console.error('[Emergency Recovery] Error al verificar backup de emergencia:', e);
+    return null;
+  }
+};
+
+export const useDesignStore = create<DesignState>((set, get) => {
+  // Intentar recuperar primero de un backup de emergencia
+  const emergencyBackup = checkEmergencyBackup();
+  // Si no hay backup de emergencia, cargar del localStorage normal
+  const savedState = loadFromLocalStorage();
+  
+  // Configurar un intervalo para crear backups de emergencia
+  if (typeof window !== 'undefined') {
+    const backupInterval = setInterval(() => {
+      try {
+        createEmergencyBackup({
+          design: get().design,
+          palette: get().palette,
+          inventory: get().inventory
+        });
+      } catch (e) {
+        console.error('[Backup Interval] Error al crear backup automático:', e);
+      }
+    }, 60000); // Backup cada minuto
+    
+    // Limpiar el intervalo cuando se cierra la ventana
+    window.addEventListener('beforeunload', () => {
+      clearInterval(backupInterval);
+    });
+  }
+
+  // Crear estado inicial basado en lo que hemos podido recuperar
+  let initialDesign = createDefaultDesign();
+  let initialPalette = defaultPalette;
+  let initialInventory = defaultInventory;
+  
+  // Primero intentar usar emergencyBackup
+  if (emergencyBackup && emergencyBackup.design) {
+    console.log('[Store Init] Usando diseño de backup de emergencia');
+    initialDesign = emergencyBackup.design;
+    
+    // Usar paleta e inventario del backup si existen
+    if (emergencyBackup.palette) {
+      initialPalette = emergencyBackup.palette;
+    }
+    
+    if (emergencyBackup.inventory) {
+      initialInventory = emergencyBackup.inventory;
+    }
+  } 
+  // Si no hay backup de emergencia, usar localStorage
+  else if (savedState) {
+    console.log('[Store Init] Usando diseño de localStorage');
+    initialDesign = savedState.design || initialDesign;
+    initialPalette = savedState.palette || initialPalette;
+    initialInventory = savedState.inventory || initialInventory;
+  }
+
+  return {
+    design: initialDesign,
+    palette: initialPalette,
+    inventory: initialInventory,
+    selectedBeadId: null,
+    history: [],
+    future: [],
+    lastUpdate: Date.now(), // Añadimos esta propiedad para forzar actualizaciones de la UI
+
+    setCell: (strandId, index, beadId) => {
+      set((state) => {
+        console.log(`[Store] setCell INMUTABLE INICIADO - strandId: ${strandId}, index: ${index}, beadId: ${beadId}`);
+
+        const strandIndex = state.design.strands.findIndex(s => s.id === strandId);
+
+        if (strandIndex === -1) {
+          console.error(`[Store] setCell ERROR: No se encontró la hebra con id ${strandId}`);
+          return state; // Devuelve el estado sin cambios
+        }
+
+        const strand = state.design.strands[strandIndex];
+        if (!strand.cells || index < 0 || index >= strand.cells.length) {
+          console.error(`[Store] setCell ERROR: Índice ${index} fuera de rango para la hebra ${strandId}`);
+          return state; // Devuelve el estado sin cambios
+        }
+
+        const currentBeadId = strand.cells[index].beadId;
+        if (currentBeadId === beadId) {
+          console.log(`[Store] setCell OMITIDO: El beadId es el mismo.`);
+          return state; // No hay cambios necesarios
+        }
+
+        // **ENFOQUE INMUTABLE CORRECTO**
+        // 1. Crear una copia profunda del diseño para evitar mutaciones accidentales.
+        const newDesign = cloneDeep(state.design);
+        
+        // 2. Actualizar la celda específica en la copia.
+        newDesign.strands[strandIndex].cells[index].beadId = beadId;
+        
+        // 3. Actualizar la marca de tiempo.
+        const newTimestamp = Date.now();
+        newDesign.updatedAt = newTimestamp;
+
+        console.log(`[Store] setCell COMPLETADO. Nuevo timestamp: ${newTimestamp}`);
+
+        // 4. Guardar en el almacenamiento local
+        saveToLocalStorage({
+          design: newDesign,
+          palette: state.palette,
+          inventory: state.inventory,
+        });
+        
+        // 5. Retornar el nuevo estado completo.
+        return {
+          design: newDesign,
+          lastUpdate: newTimestamp,
+        };
+      });
+    },
+    
+    // Función especializada para actualizar la primera línea
+    // Esta es una implementación alternativa específicamente diseñada para
+    // evitar el bug de desaparición en la primera línea
+    setFirstLineCell: (strandId, index, beadId) => {
+      set((state) => {
+        console.log(`[Store] setFirstLineCell ESPECIAL - strandId: ${strandId}, index: ${index}, beadId: ${beadId}`);
+
+        const strandIndex = state.design.strands.findIndex(s => s.id === strandId);
+
+        if (strandIndex === -1) {
+          console.error(`[Store] setFirstLineCell ERROR: No se encontró la hebra con id ${strandId}`);
+          return state; 
+        }
+
+        const strand = state.design.strands[strandIndex];
+        if (!strand.cells || index < 0 || index >= strand.cells.length) {
+          console.error(`[Store] setFirstLineCell ERROR: Índice ${index} fuera de rango para la hebra ${strandId}`);
+          return state;
+        }
+
+        // Crear una nueva copia profunda para evitar referencia al estado anterior
+        const newStrands = state.design.strands.map((s, i) => {
+          if (i !== strandIndex) return s;
+          
+          // Para la hebra específica, crear una copia nueva
+          const updatedCells = [...s.cells];
+          updatedCells[index] = { beadId };
+          
+          return {
+            ...s,
+            cells: updatedCells
+          };
+        });
+        
+        const newTimestamp = Date.now();
+        const newDesign = {
+          ...state.design,
+          strands: newStrands,
+          updatedAt: newTimestamp
+        };
+        
+        console.log(`[Store] setFirstLineCell COMPLETADO con timestamp ${newTimestamp}`);
+        
+        // Guardar en localStorage
+        saveToLocalStorage({
+          design: newDesign,
+          palette: state.palette,
+          inventory: state.inventory,
+        });
+        
+        // Devolver el nuevo estado
+        return {
+          design: newDesign,
+          lastUpdate: newTimestamp,
+        };
+      });
     },
 
     applyPattern: (strandId, range, pattern) => {
@@ -492,11 +949,47 @@ export const useDesignStore = create<DesignState>((set, get) => {
     },
 
     saveToHistory: () => {
-      const { design, history } = get()
-      set({
-        history: [...history.slice(-19), design],
-        future: [],
-      })
+      try {
+        const { design, history } = get();
+        
+        // Verificar que el diseño es válido antes de guardarlo
+        if (!design || !Array.isArray(design.strands)) {
+          console.error("[History] Error: Intentando guardar un diseño inválido en el historial");
+          return;
+        }
+        
+        console.log(`[History] Guardando en historial - hebras: ${design.strands.length}`);
+        
+        // Crear una copia profunda usando el método más seguro disponible
+        let designCopy;
+        try {
+          if (typeof structuredClone === 'function') {
+            designCopy = structuredClone(design);
+          } else {
+            designCopy = JSON.parse(JSON.stringify(design));
+          }
+        } catch (err) {
+          console.error("[History] Error al clonar diseño:", err);
+          designCopy = JSON.parse(JSON.stringify(design));
+        }
+        
+        // Verificar que la copia mantenga la estructura
+        if (!designCopy || !Array.isArray(designCopy.strands) || 
+            designCopy.strands.length !== design.strands.length) {
+          console.error("[History] Error: La copia del diseño es incorrecta");
+          return;
+        }
+        
+        // Actualizar el historial con seguridad
+        set({
+          history: [...history.slice(-19), designCopy],
+          future: [],
+        });
+        
+        console.log(`[History] Historial actualizado correctamente - ${history.length + 1} entradas`);
+      } catch (error) {
+        console.error("[History] Error en saveToHistory:", error);
+      }
     },
 
     undo: () => {

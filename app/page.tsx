@@ -143,10 +143,10 @@ export default function BeadDesigner() {
       id: staffLines.length + 1,
       beads: Array(beadsPerLine).fill(null),
     }
-    setStaffLines([...staffLines, newLine])
-    
-    // Sincronizar con el store para persistencia inmediatamente
-    syncWithStore();
+    const updated = [...staffLines, newLine]
+    setStaffLines(updated)
+    // Sincronizar con el store para persistencia inmediatamente usando snapshot
+    syncWithStore(updated)
   }
 
   const removeStaffLine = (lineId?: number) => {
@@ -156,10 +156,9 @@ export default function BeadDesigner() {
       
       if (newStaffLines.length === 0) {
         // Si se eliminaron todas las líneas, crear una línea nueva vacía
-        setStaffLines([{
-          id: 1,
-          beads: Array(beadsPerLine).fill(null)
-        }]);
+        const updatedSingle = [{ id: 1, beads: Array(beadsPerLine).fill(null) }]
+        setStaffLines(updatedSingle)
+        syncWithStore(updatedSingle)
       } else {
         // Renumerar las líneas para mantener IDs consecutivos
         const reorderedLines = newStaffLines.map((line, index) => ({
@@ -168,22 +167,21 @@ export default function BeadDesigner() {
         }));
         
         setStaffLines(reorderedLines);
+        syncWithStore(reorderedLines)
       }
     } else {
       // Comportamiento tradicional: eliminar la última línea
       if (staffLines.length > 1) {
-        setStaffLines(staffLines.slice(0, -1));
+        const trimmed = staffLines.slice(0, -1)
+        setStaffLines(trimmed)
+        syncWithStore(trimmed)
       } else {
         // Si solo queda una línea, reemplazarla por una vacía
-        setStaffLines([{
-          id: 1,
-          beads: Array(beadsPerLine).fill(null)
-        }]);
+        const updatedSingle = [{ id: 1, beads: Array(beadsPerLine).fill(null) }]
+        setStaffLines(updatedSingle)
+        syncWithStore(updatedSingle)
       }
     }
-    
-    // Sincronizar con el store para persistencia inmediatamente
-    syncWithStore();
   }
 
   // Función para mapear formas personalizadas a las formas soportadas por el store
@@ -206,78 +204,80 @@ export default function BeadDesigner() {
       shape: selectedShape,
     }
 
-    // Actualizar el estado local
-    setStaffLines(
-      staffLines.map((line) =>
+    // Actualizar el estado local con updater y sincronizar con snapshot consistente
+    setStaffLines(prev => {
+      const updated = prev.map((line) =>
         line.id === lineId
           ? { ...line, beads: line.beads.map((bead, index) => (index === position ? newBead : bead)) }
           : line,
-      ),
-    )
-
-    // Sincronizar inmediatamente con el store para persistencia
-    syncWithStore();
+      );
+      syncWithStore(updated);
+      return updated;
+    })
   }
 
   const removeBead = (lineId: number, position: number) => {
-    // Actualizar el estado local
-    setStaffLines(
-      staffLines.map((line) =>
+    // Actualizar el estado local con updater y sincronizar con snapshot consistente
+    setStaffLines(prev => {
+      const updated = prev.map((line) =>
         line.id === lineId
           ? { ...line, beads: line.beads.map((bead, index) => (index === position ? null : bead)) }
           : line,
-      ),
-    )
-
-    // Sincronizar inmediatamente con el store para persistencia
-    syncWithStore();
+      );
+      syncWithStore(updated);
+      return updated;
+    })
   }
 
-  // Función para sincronizar el estado local con el store de Zustand
-  const syncWithStore = () => {
+  // Función para sincronizar el estado local con el store de Zustand (acepta snapshot)
+  const syncWithStore = (linesSnapshot?: StaffLine[]) => {
+    const lines = linesSnapshot ?? staffLines;
     const storeState = useDesignStore.getState();
     const currentDesign = storeState.design;
-    const setCell = storeState.setCell;
-    
-    // En lugar de reconstruir todo el diseño, vamos a actualizar directamente las celdas
-    // Esto preservará el historial y el estado sin sobrescribir todo
-    staffLines.forEach((line, lineIndex) => {
-      // Asegúrate de que la strand existe en el diseño actual
-      if (lineIndex >= currentDesign.strands.length) {
-        return;
-      }
-      
-      const strandId = currentDesign.strands[lineIndex].id;
-      
-      // Actualizar las celdas individuales solo si hay cambios
-      line.beads.forEach((bead, position) => {
-        // Obtener el estado actual de la celda en el store
-        const currentCell = currentDesign.strands[lineIndex].cells[position];
-        if (!currentCell) return; // Protección contra índices fuera de rango
-        
-        // Determinar el nuevo beadId
-        let newBeadId: string | null = null;
+    const importDesign = storeState.importDesign;
+
+    // Construir paleta única a partir del snapshot
+    const uniqueBeads = new Map<string, { id: string; name: string; hex: string; mm: number; shape: string }>();
+    lines.forEach(line => {
+      line.beads.forEach(bead => {
         if (bead) {
-          newBeadId = `${bead.color}-${bead.shape}`.replace(/#/g, "");
-          
-          // Asegurarse de que la cuenta existe en la paleta
-          if (!storeState.palette[newBeadId]) {
-            storeState.addBead({
-              id: newBeadId,
-              name: bead.name,
-              hex: bead.color,
-              mm: 6, // Valor predeterminado
-              shape: mapShapeForExport(bead.shape) as "round" | "oval" | "square" | "tube" | "bicone"
-            });
-          }
-        }
-        
-        // Actualizar la celda solo si hay un cambio
-        const currentBeadId = currentCell.beadId;
-        if (newBeadId !== currentBeadId) {
-          setCell(strandId, position, newBeadId);
+          const beadId = `${bead.color}-${bead.shape}`.replace(/#/g, "");
+          uniqueBeads.set(beadId, {
+            id: beadId,
+            name: bead.name,
+            hex: bead.color,
+            mm: 6,
+            shape: mapShapeForExport(bead.shape)
+          });
         }
       });
+    });
+
+    // Construir nuevo diseño preservando datos existentes cuando sea posible
+    const newDesign = {
+      id: currentDesign.id,
+      name: currentDesign.name,
+      symmetry: currentDesign.symmetry,
+      updatedAt: Date.now(),
+      strands: lines.map((line, i) => {
+        const existing = currentDesign.strands[i];
+        return {
+          id: existing?.id ?? `strand-${i + 1}`,
+          name: existing?.name ?? `Línea ${i + 1}`,
+          lengthCm: existing?.lengthCm ?? 18,
+          diameterMm: existing?.diameterMm ?? 6,
+          cells: line.beads.map((bead) => ({
+            beadId: bead ? `${bead.color}-${bead.shape}`.replace(/#/g, "") : null,
+          }))
+        };
+      })
+    };
+
+    // Importar como actualización interna (mismo id)
+    importDesign({
+      design: newDesign as any,
+      palette: Array.from(uniqueBeads.values()) as any,
+      inventory: Array.from(uniqueBeads.values()).map(b => ({ beadId: b.id, stock: 50 })) as any,
     });
   }
 
@@ -503,7 +503,7 @@ export default function BeadDesigner() {
                     setStaffLines(newStaffLines);
                     
                     // Sincronizar con el store inmediatamente
-                    syncWithStore();
+                    syncWithStore(newStaffLines);
                   }}>
                     <Minus className="w-3 h-3" />
                   </Button>
@@ -525,7 +525,7 @@ export default function BeadDesigner() {
                     setStaffLines(newStaffLines);
                     
                     // Sincronizar con el store inmediatamente
-                    syncWithStore();
+                    syncWithStore(newStaffLines);
                   }}>
                     <Plus className="w-3 h-3" />
                   </Button>
