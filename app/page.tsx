@@ -226,16 +226,9 @@ export default function BeadDesigner() {
     }
   }
 
-  // Función para mapear formas personalizadas a las formas soportadas por el store
+  // Mantener las formas elegidas tal cual para almacenar/exportar
   const mapShapeForExport = (shape: string): string => {
-    // El tipo BeadSpec.shape en types/design.ts soporta: "round" | "oval" | "square" | "tube" | "bicone"
-    switch (shape) {
-      case "tube-horizontal": return "tube";
-      case "star": return "round"; // Podríamos usar "bicone" como alternativa
-      case "triangle": return "square";
-      case "diamond": return "square";
-      default: return shape;
-    }
+    return shape;
   }
   
   const placeBead = (lineId: number, position: number) => {

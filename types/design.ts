@@ -1,4 +1,18 @@
-export type BeadShape = "round" | "cylinder" | "cube" | "spacer" | "charm" | "oval" | "square" | "tube" | "bicone"
+export type BeadShape =
+  | "round"
+  | "cylinder"
+  | "cube"
+  | "spacer"
+  | "charm"
+  | "oval"
+  | "square"
+  | "tube"
+  | "bicone"
+  // Extended UI shapes used in the pentagram view
+  | "star"
+  | "triangle"
+  | "diamond"
+  | "tube-horizontal"
 
 export interface BeadSpec {
   id: string

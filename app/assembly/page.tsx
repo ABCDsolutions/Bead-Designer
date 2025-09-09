@@ -77,11 +77,35 @@ NOTAS:
       case "tube":
         shapeStyle = { ...baseStyle, borderRadius: "4px", transform: "scaleY(1.8)" };
         break;
+      case "tube-horizontal":
+        shapeStyle = { ...baseStyle, borderRadius: "4px", transform: "scaleX(1.8)" };
+        break;
       case "bicone":
         shapeStyle = { 
           ...baseStyle, 
           borderRadius: "0", 
           clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)" 
+        };
+        break;
+      case "star":
+        shapeStyle = {
+          ...baseStyle,
+          borderRadius: "4px",
+          clipPath: "polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)",
+        };
+        break;
+      case "triangle":
+        shapeStyle = {
+          ...baseStyle,
+          borderRadius: "0",
+          clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
+        };
+        break;
+      case "diamond":
+        shapeStyle = {
+          ...baseStyle,
+          borderRadius: "0",
+          transform: "rotate(45deg)",
         };
         break;
       default:
