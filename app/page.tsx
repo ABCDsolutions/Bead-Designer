@@ -559,7 +559,7 @@ export default function BeadDesigner() {
                   </Button>
                   <Badge variant="outline">{beadsPerLine}</Badge>
                   <Button variant="outline" size="sm" className="h-7 sm:h-8" onClick={() => {
-                    const newCount = Math.min(50, beadsPerLine + 5);
+                    const newCount = beadsPerLine + 5;
                     setBeadsPerLine(newCount);
                     
                     // Ajustar las líneas actuales al nuevo tamaño

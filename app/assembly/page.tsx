@@ -1,4 +1,5 @@
 "use client"
+import { useState, type CSSProperties } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -10,7 +11,8 @@ import {
   Download, 
   PenTool, 
   Layers, 
-  CircleDot
+  CircleDot,
+  Sparkles
 } from "lucide-react"
 import Link from "next/link"
 import { useDesignStore } from "@/lib/store"
@@ -20,6 +22,7 @@ export default function AssemblyPage() {
   // Use our safe hook to prevent hydration mismatches
   const { design, palette, inventory, isHydrated } = useSafeDesignData()
   const { exportBOM, exportSequence } = useDesignStore()
+  const [realisticPreview, setRealisticPreview] = useState(false)
   
   // Use the safe design name
   const designName = design.name;
@@ -55,17 +58,27 @@ NOTAS:
 
   const materialsList = exportBOM()
 
+  type BeadPreviewOptions = {
+    realistic?: boolean
+  }
+
   // Función para renderizar una cuenta según su forma
-  const renderBeadPreview = (bead: { hex: string; shape?: string }, size = "w-8 h-8") => {
+  const renderBeadPreview = (
+    bead: { hex: string; shape?: string },
+    size = "w-8 h-8",
+    options: BeadPreviewOptions = {}
+  ) => {
     if (!bead) return null;
     
-    const baseStyle: React.CSSProperties = {
+    const baseStyle: CSSProperties = {
       backgroundColor: bead.hex,
-      border: "2px solid rgba(0,0,0,0.2)",
-      boxShadow: "inset 0 1px 2px rgba(255,255,255,0.3), 0 1px 3px rgba(0,0,0,0.2)"
+      border: options.realistic ? "1px solid rgba(0,0,0,0.25)" : "2px solid rgba(0,0,0,0.2)",
+      boxShadow: options.realistic
+        ? "inset 0 2px 4px rgba(255,255,255,0.45), 0 3px 6px rgba(0,0,0,0.35)"
+        : "inset 0 1px 2px rgba(255,255,255,0.3), 0 1px 3px rgba(0,0,0,0.2)"
     };
 
-    let shapeStyle: React.CSSProperties = { ...baseStyle, borderRadius: "50%" }; // Default round shape
+    let shapeStyle: CSSProperties = { ...baseStyle, borderRadius: "50%" }; // Default round shape
     
     switch (bead.shape) {
       case "oval":
@@ -148,11 +161,36 @@ NOTAS:
           {/* Visual Preview */}
           <div className="lg:col-span-2">
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ImageIcon className="w-5 h-5" />
-                  Vista Previa del Artículo
-                </CardTitle>
+              <CardHeader className="space-y-2">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <CardTitle className="flex items-center gap-2">
+                    <ImageIcon className="w-5 h-5" />
+                    Vista Previa del Artículo
+                  </CardTitle>
+                  <Button
+                    size="sm"
+                    variant={realisticPreview ? "default" : "secondary"}
+                    onClick={() => setRealisticPreview((prev) => !prev)}
+                    aria-pressed={realisticPreview}
+                  >
+                    {realisticPreview ? (
+                      <>
+                        <Layers className="w-4 h-4 mr-2" />
+                        Vista detallada
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 mr-2" />
+                        Modo terminado
+                      </>
+                    )}
+                  </Button>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {realisticPreview
+                    ? "Visualiza las cuentas alineadas sobre un solo hilo continuo, como si la pieza estuviera extendida sobre la mesa."
+                    : "Mantén visible la numeración para seguir la secuencia exacta durante el armado."}
+                </p>
               </CardHeader>
               <CardContent>
                 {!isHydrated ? (
@@ -166,32 +204,66 @@ NOTAS:
                         <h3 className="font-medium text-foreground mb-4">
                           {strand.name} - {strand.lengthCm}cm (Ø{strand.diameterMm}mm)
                         </h3>
-                        <div className="flex flex-wrap gap-2 justify-center">
-                          {strand.cells.map((cell, cellIndex) => {
-                            const bead = cell.beadId ? palette[cell.beadId] : null
-                            return (
-                              <div
-                                key={cellIndex}
-                                className="w-8 h-8 rounded-lg border-2 border-border flex items-center justify-center text-xs font-medium relative"
-                                style={{
-                                  backgroundColor: bead ? undefined : "#e5e7eb",
-                                  color: bead ? (bead.hex === "#ffffff" ? "#000" : "#fff") : "#666",
-                                }}
-                                title={
-                                  bead ? `${bead.name} - Forma: ${bead.shape} - Posición ${cellIndex + 1}` : `Vacío - Posición ${cellIndex + 1}`
-                                }
-                              >
-                                {bead ? (
-                                  <div className="absolute inset-0 flex items-center justify-center">
-                                    {renderBeadPreview(bead)}
-                                    <span className="relative z-10">{cellIndex + 1}</span>
-                                  </div>
-                                ) : (
-                                  cellIndex + 1
-                                )}
-                              </div>
-                            )
-                          })}
+                        <div className={realisticPreview ? "relative w-full overflow-x-auto pb-6" : undefined}>
+                          {realisticPreview && (
+                            <div
+                              aria-hidden="true"
+                              className="pointer-events-none absolute left-6 right-6 top-1/2 h-[2px] bg-border/70"
+                            />
+                          )}
+                          <div
+                            className={
+                              realisticPreview
+                                ? "relative z-10 flex flex-nowrap items-center gap-3 justify-start px-6"
+                                : "flex flex-wrap gap-2 justify-center"
+                            }
+                          >
+                            {strand.cells.map((cell, cellIndex) => {
+                              const bead = cell.beadId ? palette[cell.beadId] : null
+                              return (
+                                <div
+                                  key={cellIndex}
+                                  className={
+                                    realisticPreview
+                                      ? "flex-shrink-0 flex items-center justify-center"
+                                      : "w-8 h-8 rounded-lg border-2 border-border flex items-center justify-center text-xs font-medium relative"
+                                  }
+                                  style={
+                                    realisticPreview
+                                      ? undefined
+                                      : {
+                                          backgroundColor: bead ? undefined : "#e5e7eb",
+                                          color: bead ? (bead.hex === "#ffffff" ? "#000" : "#fff") : "#666",
+                                        }
+                                  }
+                                  title={
+                                    bead ? `${bead.name} - Forma: ${bead.shape} - Posición ${cellIndex + 1}` : `Vacío - Posición ${cellIndex + 1}`
+                                  }
+                                >
+                                  {bead ? (
+                                    realisticPreview ? (
+                                      <div className="flex items-center justify-center">
+                                        {renderBeadPreview(bead, "w-12 h-12", { realistic: true })}
+                                      </div>
+                                    ) : (
+                                      <div className="absolute inset-0 flex items-center justify-center">
+                                        {renderBeadPreview(bead)}
+                                        <span className="relative z-10">{cellIndex + 1}</span>
+                                      </div>
+                                    )
+                                  ) : (
+                                    realisticPreview ? (
+                                      <div className="w-12 h-12 flex items-center justify-center">
+                                        <div className="w-7 h-7 rounded-full border border-dashed border-border/70 bg-transparent" />
+                                      </div>
+                                    ) : (
+                                      cellIndex + 1
+                                    )
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
                         </div>
                       </div>
                     ))}
